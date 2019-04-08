@@ -1,0 +1,247 @@
+# This is an advance version of SHOUTcast TCL made by breeze breeze@bluemoon-radio.de
+#
+# Return information about SHOUTcast DNAS Server 2 (last Build 29)
+#
+# It requires tDOM.
+# On Debian install it by apt-get install tdom
+# I dont know other OS
+# You will find the Source of tDOM on https://github.com/tDOM/tdom/#
+#
+# If you have any suggestions you can find us on IRC Network (Dalnet) irc.dal.net:6667 channel #Cyberhosters (Nick: Adeel / Mezen)
+# or via mail Adeel@cyberhosters.org
+#
+# Script Orgionally Coded By: breeze breeze@bluemoon-radio.de
+# Script Modified / Advanced by Mezen
+# Script Modification Idea by Adeel adeel@cyberhosters.org
+#
+# Download the modified version from http://cyberhosters.org/downloads.php
+#
+# =========================================================================
+#                                       ORIGIONAL VERSION (Breeze)
+# =========================================================================
+# Version 0.1
+# !info misc
+# Return misc information like listener, peak, current track, bitrate, etc....
+#
+# Version 0.2
+# !info history
+# Return Songhistory
+#
+#
+# Version 0.3
+# !info listener
+# Return Listeners with ip and connect time
+#
+# =========================================================================
+#                                       MODIFIED VERSION (Mezen / Adeel)
+# =========================================================================
+#
+# Version 0.4
+# Add a routine to announce the current song, bitrate and listeners
+# Add a routine to advertise radio url
+
+
+# channel for annoucements
+set scserv(chan)        "#Chan"
+
+# time in seconds between each song change check
+set scserv(time)        10
+
+
+# time in minutes between each chan advertisement
+set scserv(advtime)      5
+
+### settings of your admin connect to SHOUTcast Server
+set scserv(pass)        ""
+set scserv(url)         ""
+set scserv(port)        ""
+set scserv(version)     ""
+
+set cmdchar "!"
+
+#### Just edit from this line below if you know what you do ;) ####
+
+package require http
+package require tdom
+#package require tls
+#::http::register https 443 [list ::tls::socket -ssl2 0 -ssl3 0 -tls1 1]
+
+proc notice {who what} {
+        putserv "NOTICE $who == :$what"
+}
+
+proc say {who what} {
+        putserv "PRIVMSG $who == :$what"
+}
+
+proc duration {s} {
+        if {![string is double $s]} { return $s }
+        set hours [expr {$s / 3600}]
+        set minutes [expr {($s / 60) % 60}]
+        set seconds [expr {$s % 60}]
+        set res ""
+        if {$hours != 0} {append res "$hours hours"}
+        if {$minutes != 0} {append res " $minutes minutes"}
+        if {$seconds != 0} {append res " $seconds seconds"}
+        return $res
+}
+
+bind pub - "[string trim $cmdchar]info" pub:info
+
+
+proc pub:info {nick host hand chan arg} {
+        http::config -useragent "Mozilla 9.0"
+        set con [http::geturl $::scserv(url):$::scserv(port)/admin.cgi?pass=$::scserv(pass)&sid=1&mode=viewxml&page=9 -timeout 10000]
+        set urldata [http::data $con]
+        http::cleanup $con
+        set doc [dom parse $urldata]
+        set root [$doc documentElement]
+        set cmd [lindex $arg 0]
+        switch -- $cmd {
+                "misc" {
+                        catch { notice $nick "Listener: [[$root selectNodes /SHOUTCASTSERVER/CURRENTLISTENERS/text()] data]" }
+                        catch { notice $nick "Max.: [[$root selectNodes /SHOUTCASTSERVER/MAXLISTENERS/text()] data]" }
+                        catch { notice $nick "Peak: [[$root selectNodes /SHOUTCASTSERVER/PEAKLISTENERS/text()] data]" }
+                        catch { notice $nick "Unique: [[$root selectNodes /SHOUTCASTSERVER/UNIQUELISTENERS/text()] data]" }
+                        catch { notice $nick "Genre: [[$root selectNodes /SHOUTCASTSERVER/SERVERGENRE/text()] data]" }
+                        catch { notice $nick "Url: [[$root selectNodes /SHOUTCASTSERVER/SERVERURL/text()] data]" }
+                        catch { notice $nick "Tital: [[$root selectNodes /SHOUTCASTSERVER/SERVERTITLE/text()] data]" }
+                        catch { notice $nick "Track: [[$root selectNodes /SHOUTCASTSERVER/SONGTITLE/text()] data]" }
+                        catch { notice $nick "next Track: [[$root selectNodes /SHOUTCASTSERVER/NEXTTITLE/text()] data] (if playlist is connected)" }
+                        catch { notice $nick "Status: [[$root selectNodes /SHOUTCASTSERVER/STREAMSTATUS/text()] data]" }
+                        catch { notice $nick "MP3: $::scserv(url):$::scserv(port)[[$root selectNodes /SHOUTCASTSERVER/STREAMPATH/text()] data]" }
+                        catch { notice $nick "Bitrate: [[$root selectNodes /SHOUTCASTSERVER/BITRATE/text()] data] kb/s" }
+                        catch { notice $nick "Codec: [[$root selectNodes /SHOUTCASTSERVER/CONTENT/text()] data]" }
+                        catch { notice $nick "Version: [[$root selectNodes /SHOUTCASTSERVER/VERSION/text()] data]" }
+                }
+                "listener" {
+                        catch { notice $nick "-- \002LISTENER\002" }
+                        catch { notice $nick "IP | CONNECTED | PLAYER" }
+                        foreach node [$root selectNodes /SHOUTCASTSERVER/LISTENERS/LISTENER] {
+                                foreach node2 {HOSTNAME CONNECTTIME USERAGENT} {
+                                        set getnode [$node selectNodes $node2]
+                                        if {[llength $getnode] > 0} {
+                                                lappend nodeList [join [$getnode text]]
+                                        } else {
+                                                lappend nodeList N/A
+                                        }
+                                }
+                        }
+                        foreach {a b c} $nodeList {
+                                catch { notice $nick "$a | [duration $b] | $c" }
+                        }
+                }
+                "history" {
+                        set nodeList ""
+                        catch { notice $nick "-- \002SONGHISTORY\002" }
+                        catch { notice $nick "AT | TITLE" }
+                        foreach node [$root selectNodes /SHOUTCASTSERVER/SONGHISTORY/SONG] {
+                                foreach node2 {PLAYEDAT TITLE} {
+                                        set getnode [$node selectNodes $node2]
+                                        if {[llength $getnode] > 0} {
+                                                lappend nodeList [join [$getnode text]]
+                                        }
+                                }
+                        }
+                        foreach {a b} $nodeList {
+                                catch { notice $nick "[clock format $a -format {%H:%M:%S}] | $b|" }
+                        }
+                }
+                "default" {
+                        catch { notice $nick "!info misc|listener|history" }
+                }
+        }
+}
+
+proc pub:announce {} {
+        http::config -useragent "Mozilla 9.0"
+        set con [http::geturl $::scserv(url):$::scserv(port)/admin.cgi?pass=$::scserv(pass)&sid=1&mode=viewxml&page=1 -timeout 10000]
+        set urldata [http::data $con]
+        http::cleanup $con
+        set doc [dom parse $urldata]
+        set root [$doc documentElement]
+        set chan $::scserv(chan)
+
+        if {![botonchan $chan]} {
+                utimer $::scserv(time) pub:announce
+                return
+        }
+
+        set status 0
+        set song ""
+        set listeners "Unknown"
+        set bitrate "Unknown"
+        set test 0
+
+        catch { set status "[[$root selectNodes /SHOUTCASTSERVER/STREAMSTATUS/text()] data]" }
+
+        if {![info exists ::scserv(status)]} {
+                set ::scserv(status) $status
+        } elseif { $::scserv(status) != $status } {
+                if { $status  == 1 } {
+                        catch { say $chan "Radio is now \002ON\002" }
+                } else {
+                        catch { say $chan "Radio is now \002OFF\002" }
+                }
+                set ::scserv(status) $status
+        }
+
+        if {$status == 0} {
+                utimer $::scserv(time) pub:announce
+                return
+        }
+
+        catch { set song "[[$root selectNodes /SHOUTCASTSERVER/SONGTITLE/text()] data]" }
+        #catch { set listeners "[[$root selectNodes /SHOUTCASTSERVER/CURRENTLISTENERS/text()] data]" }
+        catch { set bitrate "[[$root selectNodes /SHOUTCASTSERVER/BITRATE/text()] data] kb/s" }
+
+        if {$song == ""} {
+                utimer $::scserv(time) pub:announce
+                return
+        }
+
+        if {![info exists ::scserv(song)]} {
+                set ::scserv(song) $song
+                set test 1
+        } elseif { $::scserv(song) != $song } {
+                set ::scserv(song) $song
+                set test 1
+        }
+
+        if {![info exists ::scserv(listeners)]} {
+                set ::scserv(listeners) $listeners
+                set test 1
+        } elseif { $::scserv(listeners) != $listeners } {
+                set ::scserv(listeners) $listeners
+                set test 1
+        }
+
+        if {$test == 1} {
+                # set annoucements here
+                catch { say $chan "Current \002Song\002: « $song » | \002Bitrate\002: $bitrate |" }
+        }
+
+        utimer $::scserv(time) pub:announce
+}
+
+#proc pub:advertise {} {
+#       set chan $::scserv(chan)
+#       set url "$::scserv(url):$::scserv(port)/listen.pls"
+#
+#       if {![info exists ::scserv(status)]} {
+#               set ::scserv(status) 0
+#       }
+#
+#       if {![botonchan $chan] || $::scserv(status) == 0} {
+#               timer $::scserv(advtime) pub:advertise
+#               return
+#       }
+#
+#       catch { say $chan "Listen to our \002Radio\002 on \002$url\002" }
+#       timer $::scserv(advtime) pub:advertise
+#}
+
+pub:announce
+#pub:advertise
+
+putlog "loaded sc_serv_control.tcl $::scserv(version) successfully"
